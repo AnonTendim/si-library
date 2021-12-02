@@ -1,4 +1,6 @@
 # si-library
+*Note: This project is under active development.*
+
 ## Description
 
 This library includes the functionality of estimating counterfactual outcomes using synthetic interventions (SI). More information about SI can be found [here](https://arxiv.org/abs/2006.07691).
