@@ -42,7 +42,7 @@ def import_excel(filename, drop_duplicates = True):
 
     Example of one id_to_covariate dict: {0: {'covariate_1': 100, 'covariate_2': 'red'}, 1: {'covariate_1': 110, 'covariate_2': 'yellow'}, 2: {'covariate_1': 10, 'covariate_2': 'red'}}
     '''
-    manual = 'Please refer to https://github.mit.edu/xyhan/si-library/blob/master/README.md#preprocessing.'
+    manual = 'Please refer to https://github.com/AnonTendim/si-library#readme.'
     try:
         file = pd.ExcelFile(filename)
     except FileNotFoundError:
@@ -97,16 +97,22 @@ def get_stats(df):
     stats = {}
     
     for axis in [axis1_name, axis2_name, axis3_name]: # unit, measurement, intervention
-        stats[axis] = df[axis].astype("str").unique().tolist() # list
+        #stats[axis] = df[axis].astype("str").unique().tolist() # list
+        print(axis)
+        stats[axis] = df[axis].unique().tolist() # list
         stats['%s_num' % axis] = df[axis].nunique() # number
-        stats['%s_encoder' % axis] = preprocessing.LabelEncoder() # encoder
-        stats['%s_encoder' % axis].fit(df[axis].astype("str")) 
+        #stats['%s_encoder' % axis] = preprocessing.LabelEncoder() # encoder
+        #stats['%s_encoder' % axis].fit(df[axis].astype("str")) 
+        #stats['%s_encoder' % axis].fit(df[axis])
+        stats['%s_encoder' % axis] = {index: raw for index, raw in enumerate(df[axis].unique())}#astype('category').cat.categories)} 
+        stats['%s_inverse_encoder' % axis] = {raw: index for index, raw in enumerate(df[axis].unique())}#astype('category').cat.categories)}
 
     stats[axis4_name] = list(df.columns[3:]) # list of outcome variables
     stats['%s_num' % axis4_name] = len(df.columns) - 3 # number of outcome variables
-    stats['%s_encoder' % axis4_name] = preprocessing.LabelEncoder() # encoder of outcome variables
-    stats['%s_encoder' % axis4_name].fit([str(v) for v in stats[axis4_name]])
-    
+    #stats['%s_encoder' % axis4_name] = preprocessing.LabelEncoder() # encoder of outcome variables
+    #stats['%s_encoder' % axis4_name].fit([str(v) for v in stats[axis4_name]])
+    stats['%s_encoder' % axis4_name] = {raw: index for index, raw in enumerate(stats[axis4_name])}
+    stats['%s_inverse_encoder' % axis4_name] = {index: raw for index, raw in enumerate(stats[axis4_name])}
     return stats
 
 def get_covariate_dict(df):
@@ -167,10 +173,15 @@ def convert_to_tensor(df):
     df_encoded = df.copy()
 
     for axis in [axis1_name, axis2_name, axis3_name]: # unit, measurement, intervention
-        df_encoded[axis] = stats['%s_encoder' % axis].transform(df[axis].astype("str"))
+        #df_encoded[axis] = stats['%s_encoder' % axis].transform(df[axis].astype("str"))
+        #df_encoded[axis] = stats['%s_encoder' % axis].transform(df[axis])
+        df_encoded[axis] = df[axis].map(stats['%s_inverse_encoder' % axis])#.astype('category').cat.codes
+    #print(df_encoded)
 
     tensor = Tensor(np.full((stats["%s_num" % axis1_name], stats["%s_num" % axis2_name], stats["%s_num" % axis3_name], stats["%s_num" % axis4_name]), np.nan), stats)
     df_encoded.apply(lambda row: fill_in_tensor(row, tensor.data, stats[axis4_name]), axis = 1)
+    print(df_encoded)
+    print(tensor.data)
     return tensor
 
 def pretty_print(string):
@@ -202,9 +213,15 @@ class Tensor:
                 axis1_items_list_len = []
                 for j, axis_item in enumerate(self.stats[axis_name]):
                     if axis_name == axis2_name:
-                        axis1_items_list.append(self.stats['%s_encoder' % axis1_name].inverse_transform(np.where((~np.isnan(self.data[:, j, :, i])).any(axis = 1))[0]))
+                        #print(np.where((~np.isnan(self.data[:, j, :, i])).any(axis = 1)))
+                        #print(list(map(self.stats['%s_encoder' % axis1_name].get, np.where((~np.isnan(self.data[:, j, :, i])).any(axis = 1))[0])))
+                        axis1_items_list.append(list(map(self.stats['%s_encoder' % axis1_name].get, np.where((~np.isnan(self.data[:, j, :, i])).any(axis = 1))[0])))
+                        #axis1_items_list.append(self.stats['%s_encoder' % axis1_name].inverse_transform(np.where((~np.isnan(self.data[:, j, :, i])).any(axis = 1))[0]))
                     elif axis_name == axis3_name:
-                        axis1_items_list.append(self.stats['%s_encoder' % axis1_name].inverse_transform(np.where((~np.isnan(self.data[:, :, j, i])).any(axis = 1))[0]))
+                        #print(np.where((~np.isnan(self.data[:, :, j, i])).any(axis = 1)))
+                        #print(list(map(self.stats['%s_encoder' % axis1_name].get, np.where((~np.isnan(self.data[:, :, j, i])).any(axis = 1))[0])))
+                        axis1_items_list.append(list(map(self.stats['%s_encoder' % axis1_name].get, np.where((~np.isnan(self.data[:, :, j, i])).any(axis = 1))[0])))
+                        #axis1_items_list.append(self.stats['%s_encoder' % axis1_name].inverse_transform(np.where((~np.isnan(self.data[:, :, j, i])).any(axis = 1))[0]))
                     axis1_items_list_len.append(len(axis1_items_list[-1]))
                     if verbose == True:
                         print('%s %s: %d %ss    List of %ss: %s' % (axis_name.title(), str(axis_item), axis1_items_list_len[-1], axis_name, axis_name,  return_pretty_print_list(axis1_items_list[-1])))
@@ -222,37 +239,41 @@ class Tensor:
         if constant not in self.stats[constant_axis_name]:
             raise ValueError("Constant not found in column %s." % constant_axis_name)
 
-        print("Under %s %s and %s %s (X axis: %s, Y axis: %s)" % (axis4_name.title(), entry, constant_axis_name[:-1], constant, x_axis, y_axis))
-
+        print("Under %s %s and %s %s (X axis: %s, Y axis: %s)" % (axis4_name.title(), entry, constant_axis_name.title(), constant, x_axis, y_axis))
+        print(self.data)
         if constant_axis_name == axis1_name:
-            results = self.data[self.stats['%s_encoder' % constant_axis_name].transform([constant])[0], :, :, self.stats[axis4_name].index(entry)].copy()
+            results = self.data[self.stats['%s_inverse_encoder' % constant_axis_name].get(constant), :, :, self.stats[axis4_name].index(entry)].copy()
         elif constant_axis_name == axis2_name:
-            results = self.data[:, self.stats['%s_encoder' % constant_axis_name].transform([constant])[0], :, self.stats[axis4_name].index(entry)].copy()
+            #results = self.data[:, self.stats['%s_encoder' % constant_axis_name].transform([constant])[0], :, self.stats[axis4_name].index(entry)].copy()
+            results = self.data[:, self.stats['%s_inverse_encoder' % constant_axis_name].get(constant), :, self.stats[axis4_name].index(entry)].copy()
         elif constant_axis_name == axis3_name:
-            results = self.data[:, :, self.stats['%s_encoder' % constant_axis_name].transform([constant])[0], self.stats[axis4_name].index(entry)].copy()
+            #results = self.data[:, :, self.stats['%s_encoder' % constant_axis_name].transform([constant])[0], self.stats[axis4_name].index(entry)].copy()
+            results = self.data[:, :, self.stats['%s_inverse_encoder' % constant_axis_name].get(constant), self.stats[axis4_name].index(entry)].copy()
         
+        #print(results)
         if [axis1_name, axis2_name, axis3_name].index(x_axis) < [axis1_name, axis2_name, axis3_name].index(y_axis):
             results = results.T
 
+        #print(results)
         firstrow = self.stats[x_axis]
         firstcol = self.stats[y_axis]
 
         # reverse order of rows and columns so that sorting based on scores gives ascending order
-        col_indices = range(len(firstrow))
-        row_indices = range(len(firstcol))
-        firstrow, col_indices = zip(*sorted(zip(firstrow, col_indices), reverse = True))
-        firstcol, row_indices = zip(*sorted(zip(firstcol, row_indices), reverse = True))
-        results = results[:, col_indices]
-        results = results[row_indices, :]
+        #col_indices = range(len(firstrow))
+        #row_indices = range(len(firstcol))
+        #firstrow, col_indices = zip(*sorted(zip(firstrow, col_indices), reverse = True))
+        #firstcol, row_indices = zip(*sorted(zip(firstcol, row_indices), reverse = True))
+        #results = results[:, col_indices]
+        #results = results[row_indices, :]
 
         # sort rows and columns based on number of filled entries descendingly
         col_indices = range(len(firstrow))
         row_indices = range(len(firstcol))
         col_scores = np.count_nonzero(~np.isnan(results), axis = 0)
         row_scores = np.count_nonzero(~np.isnan(results), axis = 1)
-        col_scores, col_indices, firstrow = zip(*sorted(zip(col_scores, col_indices, firstrow), reverse = True))
-        row_scores, row_indices, firstcol = zip(*sorted(zip(row_scores, row_indices, firstcol), reverse = True))
-        
+        col_scores, col_indices, firstrow = zip(*sorted(zip(-col_scores, col_indices, firstrow), reverse = False))
+        row_scores, row_indices, firstcol = zip(*sorted(zip(-row_scores, row_indices, firstcol), reverse = False))
+ 
         results = results[:, col_indices]
         results = results[row_indices, :]
         firstrow = [' '] + list(firstrow)
