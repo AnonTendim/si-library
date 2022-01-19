@@ -99,8 +99,8 @@ def get_stats(df):
     for axis in [axis1_name, axis2_name, axis3_name]: # unit, measurement, intervention
         stats[axis] = df[axis].unique().tolist() # list
         stats['%s_num' % axis] = df[axis].nunique() # number
-        stats['%s_encoder' % axis] = {raw: index for index, raw in enumerate(df[axis].unique())}
-        stats['%s_inverse_encoder' % axis] = {index: raw for index, raw in enumerate(df[axis].unique())}
+        stats['%s_encoder' % axis] = {raw: index for index, raw in enumerate(df[axis].unique())} # raw data to index
+        stats['%s_inverse_encoder' % axis] = {index: raw for index, raw in enumerate(df[axis].unique())} # index to raw data
 
     stats[axis4_name] = list(df.columns[3:]) # list of outcome variables
     stats['%s_num' % axis4_name] = len(df.columns) - 3 # number of outcome variables

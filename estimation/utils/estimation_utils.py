@@ -77,10 +77,10 @@ class SyntheticIntervention:
         test = dict()
         ci = dict()
         for (axis1_item, axis2_item, axis3_item, axis4_item) in utio_tuples:
-            axis1_index = self.tensor_obj.stats['%s_encoder' % axis1_name].transform([axis1_item])[0]
-            axis2_index = self.tensor_obj.stats['%s_encoder' % axis2_name].transform([axis2_item])[0]
-            axis3_index = self.tensor_obj.stats['%s_encoder' % axis3_name].transform([axis3_item])[0]
-            axis4_index = self.tensor_obj.stats['%s_encoder' % axis4_name].transform([axis4_item])[0]
+            axis1_index = self.tensor_obj.stats['%s_encoder' % axis1_name].get(axis1_item)
+            axis2_index = self.tensor_obj.stats['%s_encoder' % axis2_name].get(axis2_item)
+            axis3_index = self.tensor_obj.stats['%s_encoder' % axis3_name].get(axis3_item)
+            axis4_index = self.tensor_obj.stats['%s_encoder' % axis4_name].get(axis4_item)
             print("Target (%s = %s, %s = %s, %s = %s, %s = %s):" % (axis1_name, axis1_item, axis2_name, 
                 axis2_item, axis3_name, axis3_item, axis4_name, axis4_item))
             if (axis1_item, axis2_item, axis3_item, axis4_item) in self.target_to_donor:
@@ -89,7 +89,7 @@ class SyntheticIntervention:
                 tensor = self.tensor_obj.data[:, :, :, axis4_index].copy()
                 tensor[axis1_index, axis2_index, axis3_index] = np.nan
 
-                X_train, y_train, X_test = get_donor_tensor(tensor, axis1_index, axis2_index, axis3_index)
+                X_train, y_train, X_test = get_donor_tensor(self.tensor_obj.stats, tensor, axis1_index, axis2_index, axis3_index)
                 self.target_to_donor[(axis1_item, axis2_item, axis3_item, axis4_item)] = [X_train, y_train, X_test]
             if X_train is None:
                 print("(%s = %s, %s = %s, %s = %s, %s = %s): Data not sufficient for prediction" \
@@ -112,14 +112,16 @@ class SyntheticIntervention:
                     % (axis1_name, axis1_item, axis2_name, axis2_item, axis3_name, axis3_item, axis4_name, axis4_item, 
                         result[(axis1_item, axis2_item, axis3_item, axis4_item)], ci[(axis1_item, axis2_item, axis3_item, axis4_item)][0], 
                         ci[(axis1_item, axis2_item, axis3_item, axis4_item)][1]))
-                plot(y_train, beta @ X_train, beta @ X_test, True)
+                plot(y_train, beta @ X_train, beta @ X_test, True, 
+                    y_text = axis4_item, title = "\nTarget %s = %s, %s = %s, %s = %s, %s = %s" % (axis1_name, axis1_item, axis2_name, axis2_item, axis3_name, axis3_item, axis4_name, axis4_item))
             else:
                 print("(%s = %s, %s = %s, %s = %s, %s = %s): %.3f [%.3f, %.3f] (factual prediction) (%.3f (reality))" \
                     % (axis1_name, axis1_item, axis2_name, axis2_item, axis3_name, axis3_item, axis4_name, axis4_item, 
                         result[(axis1_item, axis2_item, axis3_item, axis4_item)], ci[(axis1_item, axis2_item, axis3_item, axis4_item)][0], 
                         ci[(axis1_item, axis2_item, axis3_item, axis4_item)][1], 
                         self.tensor_obj.data[axis1_index, axis2_index, axis3_index, axis4_index]))
-                plot(y_train, beta @ X_train, beta @ X_test, False, y_test = result[(axis1_item, axis2_item, axis3_item, axis4_item)])
+                plot(y_train, beta @ X_train, beta @ X_test, False, y_test = result[(axis1_item, axis2_item, axis3_item, axis4_item)], 
+                    y_text = axis4_item, title = "\nTarget %s = %s, %s = %s, %s = %s, %s = %s" % (axis1_name, axis1_item, axis2_name, axis2_item, axis3_name, axis3_item, axis4_name, axis4_item))
             print("-"*78)
 
         return result, test, ci
@@ -201,7 +203,7 @@ class SyntheticIntervention:
         ============================================================================== 
         """ 
 
-def plot(y_train, y_train_pred, y_test_pred, counterfactual, y_test = None):
+def plot(y_train, y_train_pred, y_test_pred, counterfactual, y_test = None, y_text = "", title = ""):
     if y_test != None:
         plt.plot(np.concatenate((y_train, y_test)), color='black', lw=2, label = 'ground truth')
     else:
@@ -209,6 +211,10 @@ def plot(y_train, y_train_pred, y_test_pred, counterfactual, y_test = None):
     plt.plot(np.concatenate((y_train_pred, y_test_pred), axis = None), color='lightgray', lw=2, label = 'prediction')
     plt.axvline(x=len(y_train)-1, linestyle=':', color='gray')
     plt.legend()
+    plt.xticks([0.5, len(y_train)-0.5], ['Training', 'Testing'])
+    plt.tick_params(axis=u'both', which=u'both',length=0)
+    plt.ylabel(y_text)
+    plt.title("Synthetic intervention estimation" + title)
     plt.show()
 
 
@@ -218,7 +224,7 @@ def subspace_inclusion_hypothesis_test(X_train, X_test, t1 = 0.99, t2 = 0.99, rh
         tau_test = 'pass' if (tau_hat < rho * np.linalg.norm(X_test)**2) else 'fail'
         return tau_test
 
-def get_donor_tensor(tensor, unit_ID, timestamp_ID, intervention_ID):
+def get_donor_tensor(stats, tensor, unit_ID, timestamp_ID, intervention_ID):
     ''' N x T x D tensor'''
     # criterion 1: under the specified intervention at the specified timestmap
     # criterion 2: under the same intervention at some timestamps
@@ -228,11 +234,13 @@ def get_donor_tensor(tensor, unit_ID, timestamp_ID, intervention_ID):
     test_tensor = None
     final_selected_units = None
     final_selected_timestamps = None
+    #print(list(map(stats['%s_inverse_encoder' % axis1_name].get, candidate_units_list)))
 
     # brute force method
     for num_selected_units in range(1, len(candidate_units_list)+1):
         for selected_units in combinations(candidate_units_list, num_selected_units):
             train_temp = tensor[list(selected_units)+[unit_ID], :, :].reshape(num_selected_units+1, -1)
+            #print(train_temp)
             #train_temp = np.vstack((np.reshape((1, -1)), train_temp))
             test_temp = tensor[selected_units, timestamp_ID, intervention_ID]
             selected_timestamps = np.where(~np.isnan(train_temp).any(axis=0))[0]
@@ -243,6 +251,8 @@ def get_donor_tensor(tensor, unit_ID, timestamp_ID, intervention_ID):
             max_score = min(len(selected_timestamps), num_selected_units)
             final_selected_units = selected_units
             final_selected_timestamps = selected_timestamps
+            #print(train_tensor)
+            #print("----")
     #print(final_selected_units, final_selected_timestamps)
     if final_selected_units == None and final_selected_timestamps == None:
         return None, None, None
@@ -252,8 +262,9 @@ def get_donor_tensor(tensor, unit_ID, timestamp_ID, intervention_ID):
     print("X train shape:", X_train.shape)
     print("y train shape:", y_train.shape)
     print("X test shape:", X_test.shape)
-    print("Donor %ss:" % (axis1_name), final_selected_units)
-    print("Overlapping %ss of donor %ss:" % (axis2_name, axis1_name), final_selected_timestamps)
+    print("Donor %ss:" % (axis1_name), list(map(stats['%s_inverse_encoder' % axis1_name].get, final_selected_units)))
+    #print(final_selected_timestamps)
+    #print("Overlapping %ss of donor %ss:" % (axis2_name, axis1_name), list(map(stats['%s_inverse_encoder' % axis2_name].get, final_selected_timestamps)))
     return X_train, y_train, X_test
 
 def get_ci(beta, y_pre_n, y_pre_d):
